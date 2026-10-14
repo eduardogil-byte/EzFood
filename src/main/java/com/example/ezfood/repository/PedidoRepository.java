@@ -12,6 +12,11 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
 
     List<Pedido> findByRestauranteId(Long restauranteId);
 
+
+    boolean existsByClienteId(Long clienteId);
+
+    boolean existsByRestauranteId(Long restauranteId);
+
     long countByClienteIdAndStatusIn(
             Long clienteId,
             List<StatusPedido> status
