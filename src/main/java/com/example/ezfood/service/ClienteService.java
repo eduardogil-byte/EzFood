@@ -29,6 +29,7 @@ public class ClienteService {
     }
 
     // 1. Cadastrar cliente
+    @Transactional
     public ClienteResponseDTO cadastrar(ClienteRequestDTO dados) {
 
         if (clienteRepository.existsByEmail(dados.email())) {

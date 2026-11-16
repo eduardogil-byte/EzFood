@@ -1,117 +1,154 @@
 # EzFood — API REST de gerenciamento de pedidos
 
-## Integrantes
+## Trabalho Prático do 3º Trimestre
 
-- **[Nome completo do integrante 1]**
-- **[Nome completo do integrante 2, se houver]**
+**Integrantes:** [preencher nomes completos]
 
-## Sobre o projeto
+O EzFood gerencia clientes, restaurantes e pedidos. O backend usa arquitetura em camadas e retorna DTOs JSON. Não inclui frontend, autenticação, cardápio ou itens de pedido: `valorProdutos` é o valor agregado informado na criação.
 
-O **EzFood** é uma API REST desenvolvida em Java com Spring Boot para gerenciar **clientes**, **restaurantes** e **pedidos**. O projeto aplica arquitetura em camadas, persistência com JPA/Hibernate, validação de dados por DTOs e tratamento global de exceções.
+## Tecnologias e estrutura
 
-### Entidades e relacionamentos
-
-- **Cliente:** nome, e-mail único, data de cadastro e situação (ativo/inativo).
-- **Restaurante:** nome, CNPJ único, categoria, situação (aberto/fechado) e taxa de entrega.
-- **Pedido:** cliente, restaurante, data do pedido, valor dos produtos, valor total e status.
-
-Um cliente pode ter vários pedidos; um restaurante pode receber vários pedidos. Cada pedido pertence a **um cliente** e **um restaurante** (relacionamentos `@ManyToOne`).
-
-### Regras de negócio (implementadas na camada Service)
-
-1. **RN1 — Disponibilidade:** um pedido só pode ser criado quando o cliente estiver ativo e o restaurante estiver aberto.
-2. **RN2 — Limite:** um cliente pode ter no máximo **3 pedidos ativos** (`CRIADO`, `PREPARANDO` ou `SAIU_PARA_ENTREGA`).
-3. **RN3 — Cálculo automático:** a data do pedido é registrada pelo servidor e o valor total é calculado com **valor dos produtos + taxa de entrega**. O valor total não é enviado pelo cliente.
-4. **RN4 — Cancelamento condicionado:** um pedido só pode ser cancelado durante os **primeiros 10 minutos**, enquanto estiver com status `CRIADO`.
-
-O fluxo normal de status é `CRIADO` → `PREPARANDO` → `SAIU_PARA_ENTREGA` → `ENTREGUE`. Pedidos `ENTREGUE` ou `CANCELADO` não podem avançar para outro status.
-
-## Tecnologias
-
-- Java 17
-- Spring Boot 4.1.1
-- Spring Web MVC
-- Spring Data JPA / Hibernate
-- Jakarta Bean Validation
-- Banco de dados H2 em memória
-- Maven (wrapper incluído no repositório)
-
-## Estrutura do projeto
+- Java 17; Spring Boot 4.1.1 (versão declarada no `pom.xml`).
+- Maven Wrapper 3.9.16, Spring Web MVC, Data JPA/Hibernate, Jakarta Validation, H2 e DevTools.
+- JUnit Jupiter, Spring Boot Test e MockMvc para testes.
 
 ```text
 src/main/java/com/example/ezfood/
-├── controller/   # Endpoints REST
-├── dto/          # Requisições e respostas da API
-├── entity/       # Entidades e enum de status
-├── exception/    # Tratamento global de erros
-├── repository/   # Acesso ao banco com Spring Data JPA
-├── service/      # Regras de negócio
+├── controller/   # ClienteController, RestauranteController, PedidoController
+├── service/      # CRUD e regras de negócio
+├── repository/   # JpaRepository e consultas findBy
+├── entity/       # Cliente, Restaurante, Pedido, StatusPedido
+├── dto/          # Contratos de entrada e saída
+├── exception/    # GlobalExceptionHandler (@RestControllerAdvice)
 └── EzFoodApplication.java
+src/main/resources/application.properties
+src/test/java/com/example/ezfood/
 ```
+
+## Entidades e relacionamentos
+
+- **Cliente:** id, nome, e-mail único, data de cadastro e ativo.
+- **Restaurante:** id, nome, CNPJ único, categoria, aberto e taxa de entrega.
+- **Pedido:** id, cliente, restaurante, data, valor dos produtos, total e status.
+
+Cliente e restaurante possuem `@OneToMany(mappedBy = ...)` para pedidos. Pedido é a entidade central, com dois `@ManyToOne` e chaves estrangeiras obrigatórias. IDs são `Long`, gerados pelo banco. Status é persistido como texto. Todos os repositories estendem `JpaRepository`.
+
+Não há exclusão em cascata. Cliente/restaurante com qualquer pedido vinculado, inclusive cancelado ou entregue, não pode ser excluído.
+
+## Quatro regras de negócio
+
+1. **RN1 — Disponibilidade:** só cria pedido para cliente ativo e restaurante aberto.
+2. **RN2 — Limite:** no máximo três pedidos ativos por cliente. Ativos: `CRIADO`, `PREPARANDO`, `SAIU_PARA_ENTREGA`. Entregues/cancelados liberam vaga. A criação bloqueia a linha do cliente durante a transação para serializar criações simultâneas.
+3. **RN3 — Dados automáticos:** data/hora do servidor, status inicial `CRIADO` e `valorTotal = valorProdutos + taxaEntrega`, usando `BigDecimal`.
+4. **RN4 — Cancelamento:** somente em `CRIADO`, até dez minutos após a criação, inclusive no instante exato do limite. Após esse instante, retorna 409.
+
+Fluxo obrigatório:
+
+```text
+CRIADO -> PREPARANDO -> SAIU_PARA_ENTREGA -> ENTREGUE
+CRIADO -> CANCELADO (até dez minutos)
+```
+
+Não permite saltar, retroceder ou repetir status. `ENTREGUE` e `CANCELADO` são finais. Alterações de status bloqueiam o pedido durante a transação. Fechar restaurante não cancela pedidos já criados.
 
 ## Como executar
 
-**Pré-requisito:** JDK 17 ou superior instalado.
+Pré-requisito: JDK 17 ou superior com `JAVA_HOME` apontando para o JDK e seu diretório `bin` no PATH. A primeira execução do wrapper precisa acessar os repositórios Maven para baixar a distribuição e dependências.
 
-No terminal, na raiz do projeto, execute:
-
-**Windows (PowerShell):**
+Windows/PowerShell:
 
 ```powershell
-.\mvnw.cmd clean test
+java -version
+.\mvnw.cmd clean verify
 .\mvnw.cmd spring-boot:run
 ```
 
-**Linux/macOS:**
+Linux/macOS:
 
 ```bash
-./mvnw clean test
+java -version
+./mvnw clean verify
 ./mvnw spring-boot:run
 ```
 
-A API ficará disponível, por padrão, em `http://localhost:8080`.
+API: `http://localhost:8080`. As rotas não possuem prefixo `/api`.
 
-## Endpoints
+## H2
 
-| Método | Rota | Descrição |
-| --- | --- | --- |
-| POST | `/clientes` | Cadastrar cliente |
-| GET | `/clientes` | Listar clientes |
-| GET | `/clientes/{id}` | Consultar cliente |
-| GET | `/clientes/busca?nome=Ana` | Pesquisar clientes por nome |
-| PUT | `/clientes/{id}` | Atualizar cliente |
-| DELETE | `/clientes/{id}` | Excluir cliente, se não possuir pedidos |
-| GET | `/clientes/{id}/pedidos` | Listar pedidos de um cliente |
-| POST | `/restaurantes` | Cadastrar restaurante |
-| GET | `/restaurantes` | Listar restaurantes |
-| GET | `/restaurantes/{id}` | Consultar restaurante |
-| GET | `/restaurantes/busca?nome=Sabor` | Pesquisar restaurantes por nome |
-| PUT | `/restaurantes/{id}` | Atualizar restaurante |
-| DELETE | `/restaurantes/{id}` | Excluir restaurante, se não possuir pedidos |
-| GET | `/restaurantes/{id}/pedidos` | Listar pedidos de um restaurante |
-| POST | `/pedidos` | Criar pedido |
-| GET | `/pedidos` | Listar pedidos |
-| GET | `/pedidos/{id}` | Consultar pedido |
-| PATCH | `/pedidos/{id}/status` | Alterar status do pedido |
+- Console: `http://localhost:8080/h2-console`.
+- JDBC URL: `jdbc:h2:mem:ifood`.
+- Usuário: `sa`.
+- Senha: vazia.
+- `spring.jpa.hibernate.ddl-auto=update`; SQL habilitado no console.
 
-## Exemplos de requisições
+O banco é em memória e os dados são perdidos ao encerrar a aplicação. Não há carga inicial. Cadastre cliente e restaurante antes de criar pedidos. O banco de testes é separado (`ezfood-tests`) e usa `create-drop`.
 
-Use o Postman ou Insomnia com o cabeçalho `Content-Type: application/json`.
+## Endpoints completos
 
-### Cadastrar cliente
+Use `Content-Type: application/json` em POST, PUT e PATCH. GET e DELETE não recebem corpo. `{id}` é um inteiro `Long`.
 
-`POST http://localhost:8080/clientes`
+| Método | URL | Operação | Entrada | Saída | Sucesso |
+|---|---|---|---|---|---|
+| POST | `/clientes` | Cadastrar | ClienteRequestDTO | ClienteResponseDTO | 201 |
+| GET | `/clientes` | Listar | — | ClienteResponseDTO[] | 200 |
+| GET | `/clientes/busca?nome=Ana` | Buscar por nome | Query nome obrigatória | ClienteResponseDTO[] | 200 |
+| GET | `/clientes/{id}` | Consultar | ID | ClienteResponseDTO | 200 |
+| PUT | `/clientes/{id}` | Atualizar nome/e-mail | ID + ClienteRequestDTO | ClienteResponseDTO | 200 |
+| DELETE | `/clientes/{id}` | Excluir sem pedidos | ID | Sem corpo | 204 |
+| GET | `/clientes/{id}/pedidos` | Pedidos do cliente | ID | PedidoResponseDTO[] | 200 |
+| POST | `/restaurantes` | Cadastrar | RestauranteRequestDTO | RestauranteResponseDTO | 201 |
+| GET | `/restaurantes` | Listar | — | RestauranteResponseDTO[] | 200 |
+| GET | `/restaurantes/busca?nome=Burgers` | Buscar por nome | Query nome obrigatória | RestauranteResponseDTO[] | 200 |
+| GET | `/restaurantes/{id}` | Consultar | ID | RestauranteResponseDTO | 200 |
+| PUT | `/restaurantes/{id}` | Atualizar | ID + RestauranteRequestDTO | RestauranteResponseDTO | 200 |
+| DELETE | `/restaurantes/{id}` | Excluir sem pedidos | ID | Sem corpo | 204 |
+| GET | `/restaurantes/{id}/pedidos` | Pedidos do restaurante | ID | PedidoResponseDTO[] | 200 |
+| POST | `/pedidos` | Criar | PedidoRequestDTO | PedidoResponseDTO | 201 |
+| GET | `/pedidos` | Listar | — | PedidoResponseDTO[] | 200 |
+| GET | `/pedidos/{id}` | Consultar | ID | PedidoResponseDTO | 200 |
+| PATCH | `/pedidos/{id}/status` | Avançar ou cancelar | ID + StatusPedidoRequestDTO | PedidoResponseDTO | 200 |
+
+Listagens retornam arrays sem paginação e sem ordem garantida. Busca por nome é parcial e ignora maiúsculas/minúsculas. Sem resultados, retorna `200 []`. Nas consultas de pedidos por relacionamento, um cliente/restaurante inexistente também retorna `200 []`, preservando o comportamento original.
+
+Não existem edição geral/exclusão de pedido nem filtros por status/período. Categoria é texto livre. Cliente é criado ativo; o contrato atual não oferece alteração de `ativo`.
+
+## Contratos JSON para o frontend
+
+Exemplos de IDs/datas ilustrativos. Use os IDs efetivamente retornados pelos cadastros. Propriedades extras não fazem parte do contrato; envie apenas os campos documentados.
+
+### Cliente — POST e PUT
+
+`ClienteRequestDTO`:
 
 ```json
 {
-  "nome": "Eduardo Gil",
-  "email": "eduardo@teste.com"
+  "nome": "Ana Silva",
+  "email": "ana@example.com"
 }
 ```
 
-### Cadastrar restaurante
+- `nome`: string obrigatória, não vazia, máximo 255 caracteres.
+- `email`: string obrigatória, e-mail válido, máximo 255 caracteres, único.
+- Espaços nas extremidades são removidos; e-mail é convertido para minúsculas antes da validação/persistência.
+- PUT exige nome e e-mail; não altera data nem atividade.
 
-`POST http://localhost:8080/restaurantes`
+`ClienteResponseDTO` — retornado em POST, PUT e GET individual; as listagens retornam arrays deste objeto:
+
+```json
+{
+  "id": 1,
+  "nome": "Ana Silva",
+  "email": "ana@example.com",
+  "dataCadastro": "2026-11-16",
+  "ativo": true
+}
+```
+
+`id`: inteiro; `dataCadastro`: data ISO `YYYY-MM-DD` gerada pelo servidor; `ativo`: booleano, inicialmente true.
+
+### Restaurante — POST e PUT
+
+`RestauranteRequestDTO`:
 
 ```json
 {
@@ -123,9 +160,28 @@ Use o Postman ou Insomnia com o cabeçalho `Content-Type: application/json`.
 }
 ```
 
-### Criar pedido
+- `nome`, `cnpj`, `categoria`: strings obrigatórias, não vazias, máximo 255 caracteres; espaços nas extremidades removidos.
+- `cnpj`: único após remover pontos, barra e hífens; é retornado e persistido sem essa pontuação. Assim, `12.345.678/0001-90` e `12345678000190` são tratados como o mesmo valor. Não há validação de dígitos verificadores.
+- `aberto`: booleano obrigatório; omissão ou null retorna 400. Envie false explicitamente para fechar.
+- `taxaEntrega`: número obrigatório, mínimo zero, até dez dígitos inteiros e duas casas decimais.
+- PUT exige o objeto completo, inclusive para apenas abrir/fechar.
 
-`POST http://localhost:8080/pedidos`
+`RestauranteResponseDTO`:
+
+```json
+{
+  "id": 1,
+  "nome": "EzFood Burgers",
+  "cnpj": "12345678000190",
+  "categoria": "Hamburgueria",
+  "aberto": true,
+  "taxaEntrega": 6.50
+}
+```
+
+### Pedido — POST
+
+`PedidoRequestDTO`:
 
 ```json
 {
@@ -135,11 +191,31 @@ Use o Postman ou Insomnia com o cabeçalho `Content-Type: application/json`.
 }
 ```
 
-Com taxa de entrega de `6.50`, o total calculado será `46.40`. Substitua os IDs de exemplo pelos IDs retornados nos cadastros.
+- `clienteId`, `restauranteId`: inteiros positivos obrigatórios e existentes.
+- `valorProdutos`: número obrigatório, mínimo 0.01, até dez dígitos inteiros e duas casas decimais.
+- Não enviar data, total ou status; são definidos pelo Service.
 
-### Atualizar status
+`PedidoResponseDTO` — POST, GET individual e PATCH; listagens e relacionamentos retornam arrays deste objeto:
 
-`PATCH http://localhost:8080/pedidos/1/status`
+```json
+{
+  "id": 1,
+  "clienteId": 1,
+  "clienteNome": "Ana Silva",
+  "restauranteId": 1,
+  "restauranteNome": "EzFood Burgers",
+  "dataPedido": "2026-11-16T14:30:00",
+  "valorProdutos": 39.90,
+  "valorTotal": 46.40,
+  "status": "CRIADO"
+}
+```
+
+IDs são inteiros, nomes são strings, valores são números JSON e `status` é string. `dataPedido` é data/hora ISO local do servidor, sem offset. Frações de segundo podem existir. Não dependa de duas casas na representação textual JSON: formate valores no frontend. Os nomes são os nomes atuais das entidades relacionadas. A taxa de entrega não é um campo separado da resposta do pedido; o total calculado fica armazenado.
+
+### Status — PATCH `/pedidos/{id}/status`
+
+`StatusPedidoRequestDTO`:
 
 ```json
 {
@@ -147,38 +223,85 @@ Com taxa de entrega de `6.50`, o total calculado será `46.40`. Substitua os IDs
 }
 ```
 
-Os status possíveis são `CRIADO`, `PREPARANDO`, `SAIU_PARA_ENTREGA`, `ENTREGUE` e `CANCELADO`, respeitando as regras de transição.
+Para cancelar:
 
-## Códigos HTTP
+```json
+{
+  "status": "CANCELADO"
+}
+```
 
-- `200 OK`: consulta ou atualização concluída.
-- `201 Created`: cadastro realizado.
-- `204 No Content`: exclusão realizada.
-- `400 Bad Request`: dados inválidos ou duplicidade detectada pela validação do serviço.
-- `404 Not Found`: registro não localizado.
-- `409 Conflict`: operação bloqueada por regra de negócio ou integridade referencial.
+Enum `StatusPedido`, obrigatório e com grafia exata:
 
-## Banco de dados H2
+```text
+CRIADO
+PREPARANDO
+SAIU_PARA_ENTREGA
+ENTREGUE
+CANCELADO
+```
 
-Com a aplicação em execução, acesse `http://localhost:8080/h2-console` e configure:
+A resposta é o pedido completo com o status atualizado (200). Um enum válido pode retornar 409 quando não respeitar o fluxo.
 
-- **JDBC URL:** `jdbc:h2:mem:ifood`
-- **User Name:** `sa`
-- **Password:** deixar em branco
+## Status HTTP e erros
 
-O banco é **em memória**: os registros normalmente são perdidos quando a aplicação é encerrada.
+- **200:** consulta ou atualização.
+- **201:** cadastro.
+- **204:** exclusão, corpo vazio; não chamar `response.json()` nesse retorno.
+- **400:** DTO inválido, JSON inválido, enum desconhecido, ID não numérico, parâmetro obrigatório ausente ou duplicidade detectada no Service.
+- **404:** entidade individual não encontrada ou rota inexistente tratada pelo MVC.
+- **409:** regra de negócio, integridade do banco ou conflito de bloqueio concorrente.
 
-## Testes recomendados
+Duplicidade detectada antecipadamente continua retornando 400 para preservar o contrato. Uma violação da restrição única no banco, inclusive em corrida concorrente, retorna 409.
 
-No Postman/Insomnia, verifique pelo menos:
+Formato dos erros tratados pelo advice:
 
-1. Cadastro e consulta de cliente, restaurante e pedido.
-2. Impedimento de pedido para restaurante fechado ou cliente inativo.
-3. Bloqueio do quarto pedido ativo de um mesmo cliente.
-4. Cálculo automático do total e registro automático da data.
-5. Cancelamento permitido dentro de 10 minutos e recusado fora do prazo ou em outro status.
-6. Rejeição de cadastro com e-mail/CNPJ já usado.
-7. Retorno `404` para IDs inexistentes.
-8. Bloqueio de exclusão de cliente ou restaurante com pedidos.
+```json
+{
+  "dataHora": "2026-11-16T14:31:00",
+  "status": 409,
+  "erro": "Conflict",
+  "mensagem": "Restaurante fechado. Pedido não permitido."
+}
+```
 
-> **Antes da entrega:** execute os testes e registre os resultados. Este README descreve o comportamento esperado da implementação e não substitui a validação prática.
+Validações concatenam `campo: mensagem` em `mensagem`. Não dependa do idioma/texto exato das mensagens padrão de Bean Validation. Erros de outros protocolos, como 405/415, continuam sob o tratamento padrão do Spring.
+
+## Testes automatizados
+
+```powershell
+.\mvnw.cmd clean verify
+```
+
+- `EzFoodApplicationTests`: carregamento do contexto.
+- `EzFoodApiTests`: contexto Spring real, controllers via MockMvc, services, repositories e H2 separados do banco de desenvolvimento.
+- Cobertura: cadastros, CRUD base, duplicidade em cadastro/atualização, obrigatoriedade, e-mail, texto, valores monetários, aberto ausente/null, IDs, JSON e enum inválidos, consultas, disponibilidade, limite de três ativos, liberação de vaga, cálculo e campos automáticos, cancelamento, transições, exclusão vinculada e HTTP 200/201/204/400/404/409.
+- O relógio de pedidos é injetável (`Clock`). Os testes fixam o instante e ajustam a data persistida para testar exatamente dez minutos e dez minutos mais um segundo. Não esperam dez minutos.
+- Os bloqueios concorrentes foram implementados, mas a suíte não substitui teste de carga/concorrência.
+
+**Resultado neste workspace:** compilação e testes não executados: `java`, `javac` e `mvn` não foram encontrados no PATH, `JAVA_HOME` está vazio e não foi localizado JDK nos diretórios usuais verificados. Nenhuma ferramenta foi instalada. O wrapper não substitui o JDK. A resolução das versões Maven/dependências também precisa ser confirmada em ambiente com JDK. Não há declaração de testes aprovados.
+
+## Integração futura com React + Tailwind e Vite
+
+Nenhum frontend foi criado. O backend não configura CORS. Para desenvolvimento, configure no futuro projeto Vite um proxy de mesma origem para `localhost:8080`:
+
+```js
+// Trecho de server a incorporar no vite.config.js do futuro frontend.
+server: {
+  proxy: {
+    '/clientes': 'http://localhost:8080',
+    '/restaurantes': 'http://localhost:8080',
+    '/pedidos': 'http://localhost:8080'
+  }
+}
+```
+
+No React, use caminhos relativos, por exemplo `fetch('/clientes')`. Para POST/PUT/PATCH, envie JSON com `Content-Type: application/json`. Confira `response.ok`, trate o objeto de erro e não tente ler JSON em 204. Não acrescente `/api`: esse prefixo não existe no backend.
+
+O proxy vale apenas para o servidor de desenvolvimento do Vite. Na publicação, servir frontend/API sob a mesma origem com encaminhamento das rotas, ou definir uma política CORS explícita se forem origens distintas. Tailwind não interfere no contrato HTTP.
+
+## Antes da entrega
+
+- Preencher integrantes.
+- Executar `clean verify` em ambiente com JDK e registrar o resultado real.
+- Subir a aplicação, conferir o H2 e exercitar o fluxo com IDs retornados pelos cadastros.

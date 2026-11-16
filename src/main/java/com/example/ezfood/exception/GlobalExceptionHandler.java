@@ -2,6 +2,7 @@
 package com.example.ezfood.exception;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -9,6 +10,9 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -17,6 +21,22 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, Object>> concorrencia(PessimisticLockingFailureException ex) {
+        return montarErro(HttpStatus.CONFLICT, "Operação concorrente. Tente novamente.");
+    }
+
+    @ExceptionHandler({MissingServletRequestParameterException.class,
+            MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<Map<String, Object>> parametroInvalido(Exception ex) {
+        return montarErro(HttpStatus.BAD_REQUEST, "Parâmetro obrigatório ausente ou inválido.");
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> rotaNaoEncontrada(NoResourceFoundException ex) {
+        return montarErro(HttpStatus.NOT_FOUND, "Rota não encontrada.");
+    }
 
     // 404 - Registro não encontrado
     @ExceptionHandler(NoSuchElementException.class)

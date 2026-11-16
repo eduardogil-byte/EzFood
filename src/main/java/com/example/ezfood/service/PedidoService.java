@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -37,15 +38,18 @@ public class PedidoService {
     private final PedidoRepository pedidoRepository;
     private final ClienteRepository clienteRepository;
     private final RestauranteRepository restauranteRepository;
+    private final Clock clock;
 
     public PedidoService(
             PedidoRepository pedidoRepository,
             ClienteRepository clienteRepository,
-            RestauranteRepository restauranteRepository) {
+            RestauranteRepository restauranteRepository,
+            Clock clock) {
 
         this.pedidoRepository = pedidoRepository;
         this.clienteRepository = clienteRepository;
         this.restauranteRepository = restauranteRepository;
+        this.clock = clock;
     }
 
     // 1. Cadastrar pedido
@@ -53,7 +57,7 @@ public class PedidoService {
     public PedidoResponseDTO cadastrar(PedidoRequestDTO dados) {
 
         Cliente cliente = clienteRepository
-                .findById(dados.clienteId())
+                .findByIdForUpdate(dados.clienteId())
                 .orElseThrow(() ->
                         new NoSuchElementException(
                                 "Cliente não encontrado."
@@ -122,7 +126,7 @@ public class PedidoService {
 
         pedido.setCliente(cliente);
         pedido.setRestaurante(restaurante);
-        pedido.setDataPedido(LocalDateTime.now());
+        pedido.setDataPedido(LocalDateTime.now(clock));
         pedido.setValorProdutos(valorProdutos);
         pedido.setValorTotal(valorTotal);
         pedido.setStatus(StatusPedido.CRIADO);
@@ -178,7 +182,8 @@ public class PedidoService {
             Long id,
             StatusPedidoRequestDTO dados) {
 
-        Pedido pedido = buscarEntidadePorId(id);
+        Pedido pedido = pedidoRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new NoSuchElementException("Pedido não encontrado."));
 
         StatusPedido statusAtual = pedido.getStatus();
         StatusPedido novoStatus = dados.status();
@@ -201,7 +206,7 @@ public class PedidoService {
             LocalDateTime prazoLimite = pedido.getDataPedido()
                     .plusMinutes(PRAZO_CANCELAMENTO_MINUTOS);
 
-            if (LocalDateTime.now().isAfter(prazoLimite)) {
+            if (LocalDateTime.now(clock).isAfter(prazoLimite)) {
                 throw new IllegalStateException(
                         "O prazo de 10 minutos para cancelamento expirou."
                 );

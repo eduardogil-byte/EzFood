@@ -23,6 +23,7 @@ public class Restaurante {
 
     private boolean aberto;
 
+    @Column(nullable = false, precision = 13, scale = 2)
     private BigDecimal taxaEntrega;
 
     @OneToMany(mappedBy = "restaurante")

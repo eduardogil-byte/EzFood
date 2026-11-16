@@ -14,8 +14,10 @@ public class Pedido {
 
     private LocalDateTime dataPedido;
 
+    @Column(nullable = false, precision = 13, scale = 2)
     private BigDecimal valorProdutos;
 
+    @Column(nullable = false, precision = 13, scale = 2)
     private BigDecimal valorTotal;
 
     @Enumerated(EnumType.STRING)
