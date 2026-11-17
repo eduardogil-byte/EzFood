@@ -1,351 +1,326 @@
 package com.example.ezfood;
 
 import com.example.ezfood.dto.*;
-import com.example.ezfood.entity.Pedido;
+import com.example.ezfood.entity.StatusEntrega;
 import com.example.ezfood.repository.*;
 import com.example.ezfood.service.*;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.*;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
+import org.springframework.boot.test.context.*;
+import org.springframework.context.annotation.*;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.*;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import java.math.BigDecimal;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.stream.Stream;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:ezfood-tests;DB_CLOSE_DELAY=-1",
+        "spring.datasource.url=jdbc:h2:mem:ezfood-tests;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000",
         "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.jpa.show-sql=false"
+        "spring.jpa.show-sql=false",
+        "spring.jpa.open-in-view=false"
 })
 @Import(EzFoodApiTests.Tempo.class)
 class EzFoodApiTests {
-
     @TestConfiguration(proxyBeanMethods = false)
     static class Tempo {
-        @Bean
-        @Primary
+        @Bean @Primary
         Clock testClock() {
-            return Clock.fixed(Instant.parse("2026-11-16T15:00:00Z"), ZoneOffset.UTC);
+            return Clock.fixed(Instant.parse("2026-11-17T15:00:00Z"), ZoneOffset.UTC);
         }
     }
 
     @Autowired WebApplicationContext context;
-    @Autowired ClienteRepository clientes;
-    @Autowired RestauranteRepository restaurantes;
     @Autowired PedidoRepository pedidos;
-    @Autowired ClienteService clienteService;
+    @Autowired MotoboyRepository motoboys;
+    @Autowired RestauranteRepository restaurantes;
     @Autowired RestauranteService restauranteService;
-    @Autowired PedidoService pedidoService;
+    @Autowired MotoboyService motoboyService;
+    @Autowired PedidoService entregas;
     @Autowired Clock clock;
 
     MockMvc mvc;
-    Long clienteId;
     Long restauranteId;
+    Long motoboyId;
 
     @BeforeEach
     void preparar() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
         pedidos.deleteAll();
-        clientes.deleteAll();
+        motoboys.deleteAll();
         restaurantes.deleteAll();
-        clienteId = clienteService.cadastrar(new ClienteRequestDTO("Ana", "ana@example.com")).id();
-        restauranteId = restauranteService.cadastrar(new RestauranteRequestDTO(
-                "Burgers", "12345678000190", "Hamburgueria", true, new BigDecimal("6.50"))).id();
+        restauranteId = restauranteService.cadastrar(restaurante(true, "Rua A, 10")).id();
+        motoboyId = cadastrarMotoboy("ana@example.com", true, true);
+    }
+
+    RestauranteRequestDTO restaurante(boolean ativo, String endereco) {
+        return new RestauranteRequestDTO("Burgers", "12345678000190", "Hamburgueria", endereco, ativo);
+    }
+
+    Long cadastrarMotoboy(String email, boolean ativo, boolean disponivel) {
+        return motoboyService.cadastrar(new MotoboyRequestDTO(
+                "Ana", "11999999999", email, ativo, disponivel)).id();
+    }
+
+    EntregaResponseDTO criarEntrega() {
+        return entregas.cadastrar(new EntregaRequestDTO(restauranteId,
+                "Duas marmitas", "João", "Rua B, 20", null, "Portaria"));
     }
 
     ResultActions postJson(String url, String json) throws Exception {
         return mvc.perform(post(url).contentType(MediaType.APPLICATION_JSON).content(json));
     }
 
-    ResultActions alterarStatus(Long id, String status) throws Exception {
-        return mvc.perform(patch("/pedidos/{id}/status", id)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"" + status + "\"}"));
+    ResultActions patchJson(String url, String json) throws Exception {
+        return mvc.perform(patch(url).contentType(MediaType.APPLICATION_JSON).content(json));
     }
 
-    String novoPedido() {
-        return "{\"clienteId\":%d,\"restauranteId\":%d,\"valorProdutos\":39.90}"
-                .formatted(clienteId, restauranteId);
+    ResultActions aceitar(Long entrega, Long motoboy) throws Exception {
+        return patchJson("/entregas/" + entrega + "/aceitar", "{\"motoboyId\":" + motoboy + "}");
     }
 
-    Long criarPedido() {
-        return pedidoService.cadastrar(new PedidoRequestDTO(
-                clienteId, restauranteId, new BigDecimal("39.90"))).id();
+    ResultActions alterarStatus(Long id, StatusEntrega novo) throws Exception {
+        return patchJson("/entregas/" + id + "/status", "{\"status\":\"" + novo + "\"}");
     }
 
     @Test
-    void cadastroDeClienteNormalizaEmailEDefineCamposAutomaticos() throws Exception {
-        postJson("/clientes", "{\"nome\":\" Bruno \",\"email\":\" BRUNO@EXAMPLE.COM \"}")
-                .andExpect(status().isCreated())
+    void cadastrarRestaurante() throws Exception {
+        postJson("/restaurantes", """
+                {"nome":"Pizza","cnpj":"98.765.432/0001-10","categoria":"Pizzaria",
+                 "enderecoRetirada":"Rua C, 30","ativo":true}
+                """).andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNumber())
-                .andExpect(jsonPath("$.nome").value("Bruno"))
-                .andExpect(jsonPath("$.email").value("bruno@example.com"))
-                .andExpect(jsonPath("$.dataCadastro").isString())
-                .andExpect(jsonPath("$.ativo").value(true));
+                .andExpect(jsonPath("$.cnpj").value("98765432000110"))
+                .andExpect(jsonPath("$.enderecoRetirada").value("Rua C, 30"));
     }
 
     @Test
-    void cadastroDeRestaurante() throws Exception {
-        postJson("/restaurantes", """
-                {"nome":"Pizza","cnpj":"98765432000100","categoria":"Pizzaria",
-                 "aberto":false,"taxaEntrega":0}
-                """)
+    void cadastrarMotoboy() throws Exception {
+        postJson("/motoboys", """
+                {"nome":"Beto","telefone":"11988888888","email":" BETO@example.com ",
+                 "ativo":true,"disponivel":true}
+                """).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email").value("beto@example.com"))
+                .andExpect(jsonPath("$.dataCadastro").value(LocalDateTime.now(clock).toString() + ":00"));
+    }
+
+    @Test
+    void criarEntregaComDadosAutomaticos() throws Exception {
+        postJson("/entregas", """
+                {"restauranteId":%d,"descricaoConteudo":"Marmitas","nomeDestinatario":"João",
+                 "enderecoEntrega":"Rua B, 20","status":"ENTREGUE","motoboyId":%d,
+                 "dataCriacao":"2000-01-01T00:00:00","dataAceitacao":"2000-01-01T00:00:00",
+                 "dataConclusao":"2000-01-01T00:00:00"}
+                """.formatted(restauranteId, motoboyId))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.aberto").value(false))
-                .andExpect(jsonPath("$.taxaEntrega").value(0));
+                .andExpect(jsonPath("$.status").value("DISPONIVEL"))
+                .andExpect(jsonPath("$.enderecoRetirada").value("Rua A, 10"))
+                .andExpect(jsonPath("$.motoboyId").isEmpty())
+                .andExpect(jsonPath("$.dataAceitacao").isEmpty())
+                .andExpect(jsonPath("$.dataConclusao").isEmpty())
+                .andExpect(jsonPath("$.dataCriacao").value("2026-11-17T15:00:00"));
     }
 
     @Test
-    void duplicidadesNoCadastroEAtualizacao() throws Exception {
-        postJson("/clientes", "{\"nome\":\"Outra\",\"email\":\"ANA@EXAMPLE.COM\"}")
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.status").value(400));
-        postJson("/restaurantes", """
-                {"nome":"Outro","cnpj":"12345678000190","categoria":"Teste",
-                 "aberto":true,"taxaEntrega":0}
-                """).andExpect(status().isBadRequest());
-        postJson("/restaurantes", """
-                {"nome":"Outro","cnpj":"12.345.678/0001-90","categoria":"Teste",
-                 "aberto":true,"taxaEntrega":0}
-                """).andExpect(status().isBadRequest());
-        Long outroCliente = clienteService.cadastrar(new ClienteRequestDTO("Bia", "bia@example.com")).id();
-        mvc.perform(put("/clientes/{id}", outroCliente).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"nome\":\"Bia\",\"email\":\"ana@example.com\"}"))
-                .andExpect(status().isBadRequest());
-        Long outroRestaurante = restauranteService.cadastrar(new RestauranteRequestDTO(
-                "Pizza", "98765432000100", "Pizza", true, BigDecimal.ZERO)).id();
-        mvc.perform(put("/restaurantes/{id}", outroRestaurante).contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"nome":"Pizza","cnpj":"12345678000190","categoria":"Pizza",
-                         "aberto":true,"taxaEntrega":0}
-                        """))
-                .andExpect(status().isBadRequest());
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"{}", "{\"nome\":\" \",\"email\":\"ana@example.com\"}",
-            "{\"nome\":\"Ana\",\"email\":\"invalido\"}", "{\"nome\":\"Ana\",\"email\":null}"})
-    void validaCliente(String json) throws Exception {
-        postJson("/clientes", json).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.dataHora").isString())
-                .andExpect(jsonPath("$.status").value(400))
-                .andExpect(jsonPath("$.erro").value("Bad Request"))
-                .andExpect(jsonPath("$.mensagem").isNotEmpty());
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "{}",
-            "{\"nome\":\"R\",\"cnpj\":\"1\",\"categoria\":\"C\",\"taxaEntrega\":0}",
-            "{\"nome\":\"R\",\"cnpj\":\"1\",\"categoria\":\"C\",\"aberto\":null,\"taxaEntrega\":0}",
-            "{\"nome\":\"R\",\"cnpj\":\"1\",\"categoria\":\"C\",\"aberto\":true,\"taxaEntrega\":-1}",
-            "{\"nome\":\"R\",\"cnpj\":\"1\",\"categoria\":\"C\",\"aberto\":true,\"taxaEntrega\":1.001}",
-            "{\"nome\":\"R\",\"cnpj\":\" \",\"categoria\":\"C\",\"aberto\":true,\"taxaEntrega\":0}",
-            "{\"nome\":\"R\",\"cnpj\":\"1\",\"categoria\":\" \",\"aberto\":true,\"taxaEntrega\":0}"})
-    void validaRestauranteIncluindoAbertoObrigatorio(String json) throws Exception {
-        postJson("/restaurantes", json).andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void rejeitaTextoEValoresMonetariosAcimaDoLimite() throws Exception {
-        postJson("/clientes", "{\"nome\":\"" + "a".repeat(256) + "\",\"email\":\"x@example.com\"}")
-                .andExpect(status().isBadRequest());
-        postJson("/pedidos", novoPedido().replace("39.90", "10000000000.00"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"0", "-1", "0.001", "1.001", "null"})
-    void validaValorDoPedido(String valor) throws Exception {
-        postJson("/pedidos", novoPedido().replace("39.90", valor)).andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void validaIdsEStatusObrigatorios() throws Exception {
-        postJson("/pedidos", "{}").andExpect(status().isBadRequest());
-        postJson("/pedidos", novoPedido().replace("\"clienteId\":" + clienteId, "\"clienteId\":0"))
-                .andExpect(status().isBadRequest());
-        Long id = criarPedido();
-        mvc.perform(patch("/pedidos/{id}/status", id).contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isBadRequest());
-        alterarStatus(id, "DESCONHECIDO").andExpect(status().isBadRequest());
-        postJson("/clientes", "{").andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void calculaTotalEInicializaDataEStatus() throws Exception {
-        postJson("/pedidos", novoPedido()).andExpect(status().isCreated())
-                .andExpect(jsonPath("$.clienteId").value(clienteId.intValue()))
-                .andExpect(jsonPath("$.restauranteId").value(restauranteId.intValue()))
-                .andExpect(jsonPath("$.clienteNome").value("Ana"))
-                .andExpect(jsonPath("$.restauranteNome").value("Burgers"))
-                .andExpect(jsonPath("$.status").value("CRIADO"))
-                .andExpect(jsonPath("$.valorProdutos").value(39.90))
-                .andExpect(jsonPath("$.valorTotal").value(46.40));
-        Pedido salvo = pedidos.findAll().get(0);
-        assertThat(salvo.getDataPedido()).isEqualTo(LocalDateTime.now(clock));
-        assertThat(salvo.getValorTotal()).isEqualByComparingTo("46.40");
-    }
-
-    @Test
-    void bloqueiaClienteInativoERestauranteFechado() throws Exception {
-        var cliente = clientes.findById(clienteId).orElseThrow();
-        cliente.setAtivo(false);
-        clientes.saveAndFlush(cliente);
-        postJson("/pedidos", novoPedido()).andExpect(status().isConflict());
-        cliente.setAtivo(true);
-        clientes.saveAndFlush(cliente);
-        var restaurante = restaurantes.findById(restauranteId).orElseThrow();
-        restaurante.setAberto(false);
-        restaurantes.saveAndFlush(restaurante);
-        postJson("/pedidos", novoPedido()).andExpect(status().isConflict());
+    void restauranteInativoNaoCriaEntrega() throws Exception {
+        restauranteService.atualizar(restauranteId, restaurante(false, "Rua A, 10"));
+        postJson("/entregas", """
+                {"restauranteId":%d,"descricaoConteudo":"Marmitas",
+                 "nomeDestinatario":"João","enderecoEntrega":"Rua B, 20"}
+                """.formatted(restauranteId)).andExpect(status().isConflict());
         assertThat(pedidos.count()).isZero();
     }
 
     @Test
-    void limitaTresAtivosEReabreVagaAposCancelamento() throws Exception {
-        Long primeiro = criarPedido();
-        Long segundo = criarPedido();
-        alterarStatus(segundo, "PREPARANDO").andExpect(status().isOk());
-        alterarStatus(segundo, "SAIU_PARA_ENTREGA").andExpect(status().isOk());
-        criarPedido();
-        postJson("/pedidos", novoPedido()).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value(409));
-        alterarStatus(primeiro, "CANCELADO").andExpect(status().isOk());
-        postJson("/pedidos", novoPedido()).andExpect(status().isCreated());
+    void aceitarRetiraDaListaDisponivelEImpedeSegundaAceitacao() throws Exception {
+        Long id = criarEntrega().id();
+        mvc.perform(get("/entregas/disponiveis")).andExpect(jsonPath("$[0].id").value(id));
+        aceitar(id, motoboyId).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACEITA"))
+                .andExpect(jsonPath("$.motoboyId").value(motoboyId))
+                .andExpect(jsonPath("$.dataAceitacao").value("2026-11-17T15:00:00"));
+        mvc.perform(get("/entregas/disponiveis")).andExpect(content().json("[]"));
+        aceitar(id, cadastrarMotoboy("beto@example.com", true, true))
+                .andExpect(status().isConflict());
+        aceitar(id, motoboyId).andExpect(status().isConflict());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,true", "true,false", "false,false"})
+    void somenteMotoboyAtivoDisponivelAceita(boolean ativo, boolean disponivel) throws Exception {
+        Long outro = cadastrarMotoboy("outro@example.com", ativo, disponivel);
+        aceitar(criarEntrega().id(), outro).andExpect(status().isConflict());
     }
 
     @Test
-    void cancelamentoPermitidoExatamenteAosDezMinutos() throws Exception {
-        Long id = criarPedido();
-        Pedido pedido = pedidos.findById(id).orElseThrow();
-        pedido.setDataPedido(LocalDateTime.now(clock).minusMinutes(10));
-        pedidos.saveAndFlush(pedido);
-        alterarStatus(id, "CANCELADO").andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CANCELADO"));
-        alterarStatus(id, "PREPARANDO").andExpect(status().isConflict());
-        alterarStatus(id, "CANCELADO").andExpect(status().isConflict());
+    void limiteUmaEntregaEConclusaoLiberaVaga() throws Exception {
+        Long primeira = criarEntrega().id();
+        Long segunda = criarEntrega().id();
+        aceitar(primeira, motoboyId).andExpect(status().isOk());
+        aceitar(segunda, motoboyId).andExpect(status().isConflict());
+        alterarStatus(primeira, StatusEntrega.RETIRADA).andExpect(status().isOk());
+        aceitar(segunda, motoboyId).andExpect(status().isConflict());
+        alterarStatus(primeira, StatusEntrega.EM_ROTA).andExpect(status().isOk());
+        aceitar(segunda, motoboyId).andExpect(status().isConflict());
+        alterarStatus(primeira, StatusEntrega.ENTREGUE).andExpect(status().isOk())
+                .andExpect(jsonPath("$.dataConclusao").value("2026-11-17T15:00:00"));
+        aceitar(segunda, motoboyId).andExpect(status().isOk());
     }
 
-    @Test
-    void cancelamentoExpiraAposDezMinutos() throws Exception {
-        Long id = criarPedido();
-        Pedido pedido = pedidos.findById(id).orElseThrow();
-        pedido.setDataPedido(LocalDateTime.now(clock).minusMinutes(10).minusSeconds(1));
-        pedidos.saveAndFlush(pedido);
-        alterarStatus(id, "CANCELADO").andExpect(status().isConflict());
-        assertThat(pedidos.findById(id).orElseThrow().getStatus().name()).isEqualTo("CRIADO");
+    static Stream<Arguments> transicoes() {
+        return Arrays.stream(StatusEntrega.values()).flatMap(origem ->
+                Arrays.stream(StatusEntrega.values()).map(destino -> Arguments.of(origem, destino)));
     }
 
-    @Test
-    void respeitaFluxoEBloqueiaSaltosRepeticoesRetrocessoECancelamentoTardio() throws Exception {
-        Long id = criarPedido();
-        alterarStatus(id, "ENTREGUE").andExpect(status().isConflict());
-        alterarStatus(id, "CRIADO").andExpect(status().isConflict());
-        alterarStatus(id, "PREPARANDO").andExpect(status().isOk());
-        alterarStatus(id, "CANCELADO").andExpect(status().isConflict());
-        alterarStatus(id, "CRIADO").andExpect(status().isConflict());
-        alterarStatus(id, "SAIU_PARA_ENTREGA").andExpect(status().isOk());
-        alterarStatus(id, "ENTREGUE").andExpect(status().isOk());
-        alterarStatus(id, "PREPARANDO").andExpect(status().isConflict());
-        alterarStatus(id, "CANCELADO").andExpect(status().isConflict());
-        // ENTREGUE também libera uma vaga no limite de ativos.
-        criarPedido();
-        criarPedido();
-        postJson("/pedidos", novoPedido()).andExpect(status().isCreated());
-    }
-
-    @Test
-    void bloqueiaExclusaoComPedidosMesmoCancelados() throws Exception {
-        Long id = criarPedido();
-        alterarStatus(id, "CANCELADO").andExpect(status().isOk());
-        mvc.perform(delete("/clientes/{id}", clienteId)).andExpect(status().isConflict());
-        mvc.perform(delete("/restaurantes/{id}", restauranteId)).andExpect(status().isConflict());
-        assertThat(clientes.existsById(clienteId)).isTrue();
-        assertThat(restaurantes.existsById(restauranteId)).isTrue();
-    }
-
-    @Test
-    void consultaListasNomesERelacionamentos() throws Exception {
-        Long id = criarPedido();
-        mvc.perform(get("/clientes")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get("/restaurantes")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get("/pedidos")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get("/clientes/{id}", clienteId)).andExpect(status().isOk());
-        mvc.perform(get("/restaurantes/{id}", restauranteId)).andExpect(status().isOk());
-        mvc.perform(get("/pedidos/{id}", id)).andExpect(status().isOk());
-        mvc.perform(get("/clientes/busca").param("nome", "AN"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get("/restaurantes/busca").param("nome", "BURG"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get("/clientes/{id}/pedidos", clienteId))
-                .andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(id.intValue()));
-        mvc.perform(get("/restaurantes/{id}/pedidos", restauranteId))
-                .andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(id.intValue()));
-        mvc.perform(get("/clientes/busca").param("nome", "inexistente"))
-                .andExpect(status().isOk()).andExpect(content().json("[]"));
-    }
-
-    @Test
-    void atualizaEExcluiEntidadesSemPedidos() throws Exception {
-        mvc.perform(put("/restaurantes/{id}", restauranteId).contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"nome":"Burgers","cnpj":"12345678000190","categoria":"Hamburgueria",
-                         "taxaEntrega":7.50}
-                        """))
-                .andExpect(status().isBadRequest());
-        assertThat(restaurantes.findById(restauranteId).orElseThrow().isAberto()).isTrue();
-        mvc.perform(put("/clientes/{id}", clienteId).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"nome\":\"Ana Silva\",\"email\":\"ana@example.com\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.nome").value("Ana Silva"));
-        mvc.perform(put("/restaurantes/{id}", restauranteId).contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"nome":"Burgers","cnpj":"12345678000190","categoria":"Hamburgueria",
-                         "aberto":false,"taxaEntrega":7.50}
-                        """))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.aberto").value(false));
-        mvc.perform(delete("/clientes/{id}", clienteId))
-                .andExpect(status().isNoContent()).andExpect(content().string(""));
-        mvc.perform(delete("/restaurantes/{id}", restauranteId))
-                .andExpect(status().isNoContent()).andExpect(content().string(""));
-    }
-
-    @Test
-    void padronizaNaoEncontradoEParametrosInvalidos() throws Exception {
-        for (String base : new String[]{"/clientes", "/restaurantes", "/pedidos"}) {
-            mvc.perform(get(base + "/9223372036854775807"))
-                    .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status").value(404))
-                    .andExpect(jsonPath("$.erro").value("Not Found"))
-                    .andExpect(jsonPath("$.mensagem").isNotEmpty());
-            mvc.perform(get(base + "/abc")).andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.status").value(400));
+    @ParameterizedTest
+    @MethodSource("transicoes")
+    void matrizDeTransicoes(StatusEntrega origem, StatusEntrega destino) throws Exception {
+        Long id = criarEntrega().id();
+        if (origem == StatusEntrega.CANCELADA) {
+            alterarStatus(id, origem).andExpect(status().isOk());
+        } else if (origem != StatusEntrega.DISPONIVEL) {
+            aceitar(id, motoboyId).andExpect(status().isOk());
+            for (StatusEntrega etapa : List.of(StatusEntrega.RETIRADA, StatusEntrega.EM_ROTA, StatusEntrega.ENTREGUE)) {
+                if (entregas.buscarPorId(id).status() == origem) break;
+                alterarStatus(id, etapa).andExpect(status().isOk());
+            }
         }
-        mvc.perform(get("/clientes/busca")).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400));
-        mvc.perform(get("/restaurantes/busca")).andExpect(status().isBadRequest());
-        postJson("/pedidos", novoPedido().replace("\"clienteId\":" + clienteId,
-                "\"clienteId\":9223372036854775807")).andExpect(status().isNotFound());
-        postJson("/pedidos", novoPedido().replace("\"restauranteId\":" + restauranteId,
-                "\"restauranteId\":9223372036854775807")).andExpect(status().isNotFound());
-        alterarStatus(Long.MAX_VALUE, "PREPARANDO").andExpect(status().isNotFound());
-        mvc.perform(get("/rota-inexistente")).andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.status").value(404));
+        boolean permitida = switch (origem) {
+            case DISPONIVEL -> destino == StatusEntrega.CANCELADA;
+            case ACEITA -> destino == StatusEntrega.RETIRADA;
+            case RETIRADA -> destino == StatusEntrega.EM_ROTA;
+            case EM_ROTA -> destino == StatusEntrega.ENTREGUE;
+            case ENTREGUE, CANCELADA -> false;
+        };
+        alterarStatus(id, destino).andExpect(permitida ? status().isOk() : status().isConflict());
+        assertThat(entregas.buscarPorId(id).status()).isEqualTo(permitida ? destino : origem);
+    }
+
+    @Test
+    void cancelamentoFinalEDadosHistoricos() throws Exception {
+        Long id = criarEntrega().id();
+        restauranteService.atualizar(restauranteId, restaurante(true, "Novo endereço"));
+        assertThat(entregas.buscarPorId(id).enderecoRetirada()).isEqualTo("Rua A, 10");
+        alterarStatus(id, StatusEntrega.CANCELADA).andExpect(status().isOk());
+        aceitar(id, motoboyId).andExpect(status().isConflict());
+        mvc.perform(delete("/restaurantes/{id}", restauranteId)).andExpect(status().isConflict());
+        assertThat(entregas.buscarPorId(id).dataConclusao()).isNull();
+    }
+
+    @Test
+    void consultasAtualizacoesEExclusao() throws Exception {
+        Long id = criarEntrega().id();
+        aceitar(id, motoboyId).andExpect(status().isOk());
+        for (String url : List.of("/restaurantes", "/motoboys", "/entregas",
+                "/restaurantes/" + restauranteId + "/entregas", "/motoboys/" + motoboyId + "/entregas")) {
+            mvc.perform(get(url)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+        }
+        for (String url : List.of("/restaurantes/" + restauranteId, "/motoboys/" + motoboyId, "/entregas/" + id)) {
+            mvc.perform(get(url)).andExpect(status().isOk()).andExpect(jsonPath("$.id").isNumber());
+        }
+        patchJson("/motoboys/" + motoboyId + "/disponibilidade", "{\"disponivel\":false}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.disponivel").value(false));
+        mvc.perform(put("/motoboys/{id}", motoboyId).contentType(MediaType.APPLICATION_JSON).content("""
+                {"nome":"Ana Silva","email":"ana@example.com","telefone":"11999999999",
+                 "ativo":true,"disponivel":true}
+                """)).andExpect(status().isOk()).andExpect(jsonPath("$.nome").value("Ana Silva"));
+        mvc.perform(put("/restaurantes/{id}", restauranteId).contentType(MediaType.APPLICATION_JSON).content("""
+                {"nome":"Burgers","cnpj":"12345678000190","categoria":"Hamburgueria",
+                 "enderecoRetirada":"Rua Nova","ativo":false}
+                """)).andExpect(status().isOk()).andExpect(jsonPath("$.ativo").value(false));
+        Long semEntregas = restauranteService.cadastrar(new RestauranteRequestDTO(
+                "Pizza", "98765432000110", "Pizzaria", "Rua C", true)).id();
+        mvc.perform(delete("/restaurantes/{id}", semEntregas)).andExpect(status().isNoContent());
+        mvc.perform(get("/restaurantes/{id}", semEntregas)).andExpect(status().isNotFound());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "/restaurantes,{}", "/motoboys,{}", "/entregas,{}",
+            "/motoboys,'{\"nome\":\"Ana\",\"telefone\":\"1\",\"email\":\"invalido\",\"ativo\":true,\"disponivel\":true}'",
+            "/entregas,'{\"restauranteId\":-1,\"descricaoConteudo\":\" \",\"nomeDestinatario\":\"João\",\"enderecoEntrega\":\"Rua B\"}'"
+    })
+    void dtoInvalidoRetorna400(String url, String json) throws Exception {
+        postJson(url, json).andExpect(status().isBadRequest()).andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void errosHttpEDuplicidades() throws Exception {
+        postJson("/motoboys", """
+                {"nome":"Ana","telefone":"1","email":"ANA@example.com","ativo":true,"disponivel":true}
+                """).andExpect(status().isConflict());
+        postJson("/restaurantes", """
+                {"nome":"Burgers","cnpj":"12.345.678/0001-90","categoria":"Hamburgueria",
+                 "enderecoRetirada":"Rua A","ativo":true}
+                """).andExpect(status().isConflict());
+        for (String url : List.of("/restaurantes/999999", "/motoboys/999999", "/entregas/999999",
+                "/restaurantes/999999/entregas", "/motoboys/999999/entregas", "/rota-inexistente")) {
+            mvc.perform(get(url)).andExpect(status().isNotFound()).andExpect(jsonPath("$.status").value(404));
+        }
+        Long id = criarEntrega().id();
+        aceitar(999999L, motoboyId).andExpect(status().isNotFound());
+        aceitar(id, 999999L).andExpect(status().isNotFound());
+        patchJson("/entregas/" + id + "/aceitar", "{}").andExpect(status().isBadRequest());
+        patchJson("/entregas/" + id + "/aceitar", "{\"motoboyId\":0}").andExpect(status().isBadRequest());
+        patchJson("/entregas/" + id + "/status", "{\"status\":\"INEXISTENTE\"}").andExpect(status().isBadRequest());
+        patchJson("/entregas/" + id + "/status", "{}").andExpect(status().isBadRequest());
+        patchJson("/motoboys/" + motoboyId + "/disponibilidade", "{}").andExpect(status().isBadRequest());
+        mvc.perform(get("/entregas/abc")).andExpect(status().isBadRequest());
+        postJson("/entregas", "{").andExpect(status().isBadRequest());
+    }
+
+    @RepeatedTest(3)
+    void concorrenciaNaMesmaEntregaRetorna200E409() throws Exception {
+        Long id = criarEntrega().id();
+        Long outro = cadastrarMotoboy("outro@example.com", true, true);
+        assertThat(aceitarSimultaneamente(id, motoboyId, id, outro)).containsExactlyInAnyOrder(200, 409);
+        EntregaResponseDTO resultado = entregas.buscarPorId(id);
+        assertThat(resultado.status()).isEqualTo(StatusEntrega.ACEITA);
+        assertThat(resultado.motoboyId()).isIn(motoboyId, outro);
+        assertThat(resultado.dataAceitacao()).isEqualTo(LocalDateTime.now(clock));
+    }
+
+    @RepeatedTest(3)
+    void concorrenciaMesmoMotoboyEmEntregasDiferentes() throws Exception {
+        Long primeira = criarEntrega().id();
+        Long segunda = criarEntrega().id();
+        assertThat(aceitarSimultaneamente(primeira, motoboyId, segunda, motoboyId))
+                .containsExactlyInAnyOrder(200, 409);
+        assertThat(entregas.listarPorMotoboy(motoboyId)).hasSize(1);
+        assertThat(entregas.listarDisponiveis()).hasSize(1);
+    }
+
+    List<Integer> aceitarSimultaneamente(Long primeira, Long primeiroMotoboy,
+                                        Long segunda, Long segundoMotoboy) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch prontas = new CountDownLatch(2);
+        CountDownLatch iniciar = new CountDownLatch(1);
+        try {
+            Future<Integer> a = executor.submit(() -> executarAceitacao(prontas, iniciar, primeira, primeiroMotoboy));
+            Future<Integer> b = executor.submit(() -> executarAceitacao(prontas, iniciar, segunda, segundoMotoboy));
+            assertThat(prontas.await(5, TimeUnit.SECONDS)).isTrue();
+            iniciar.countDown();
+            return List.of(a.get(20, TimeUnit.SECONDS), b.get(20, TimeUnit.SECONDS));
+        } finally {
+            iniciar.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    int executarAceitacao(CountDownLatch prontas, CountDownLatch iniciar, Long id, Long motoboy) throws Exception {
+        prontas.countDown();
+        if (!iniciar.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Tempo de início excedido");
+        return aceitar(id, motoboy).andReturn().getResponse().getStatus();
     }
 }

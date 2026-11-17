@@ -3,7 +3,7 @@ package com.example.ezfood.controller;
 
 import com.example.ezfood.dto.RestauranteRequestDTO;
 import com.example.ezfood.dto.RestauranteResponseDTO;
-import com.example.ezfood.dto.PedidoResponseDTO;
+import com.example.ezfood.dto.EntregaResponseDTO;
 
 import com.example.ezfood.service.RestauranteService;
 import com.example.ezfood.service.PedidoService;
@@ -88,9 +88,9 @@ public class RestauranteController {
         return ResponseEntity.noContent().build();
     }
 
-    // Listar pedidos de um restaurante
-    @GetMapping("/{id}/pedidos")
-    public ResponseEntity<List<PedidoResponseDTO>> listarPedidos(
+    // Listar entregas de um restaurante
+    @GetMapping("/{id}/entregas")
+    public ResponseEntity<List<EntregaResponseDTO>> listarEntregas(
             @PathVariable Long id) {
 
         return ResponseEntity.ok(

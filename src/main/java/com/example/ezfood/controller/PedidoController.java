@@ -1,9 +1,10 @@
 
 package com.example.ezfood.controller;
 
-import com.example.ezfood.dto.PedidoRequestDTO;
-import com.example.ezfood.dto.PedidoResponseDTO;
-import com.example.ezfood.dto.StatusPedidoRequestDTO;
+import com.example.ezfood.dto.AceitarEntregaRequestDTO;
+import com.example.ezfood.dto.EntregaRequestDTO;
+import com.example.ezfood.dto.EntregaResponseDTO;
+import com.example.ezfood.dto.StatusEntregaRequestDTO;
 
 import com.example.ezfood.service.PedidoService;
 
@@ -16,7 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/pedidos")
+@RequestMapping("/entregas")
 public class PedidoController {
 
     private final PedidoService pedidoService;
@@ -25,27 +26,39 @@ public class PedidoController {
         this.pedidoService = pedidoService;
     }
 
-    // Criar pedido
+    // Criar entrega
     @PostMapping
-    public ResponseEntity<PedidoResponseDTO> cadastrar(
-            @Valid @RequestBody PedidoRequestDTO dados) {
+    public ResponseEntity<EntregaResponseDTO> cadastrar(
+            @Valid @RequestBody EntregaRequestDTO dados) {
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(pedidoService.cadastrar(dados));
     }
 
-    // Listar todos os pedidos
+    // Listar todas as entregas
     @GetMapping
-    public ResponseEntity<List<PedidoResponseDTO>> listarTodos() {
+    public ResponseEntity<List<EntregaResponseDTO>> listarTodos() {
 
         return ResponseEntity.ok(
                 pedidoService.listarTodos()
         );
     }
 
-    // Buscar pedido pelo ID
+    @GetMapping("/disponiveis")
+    public ResponseEntity<List<EntregaResponseDTO>> listarDisponiveis() {
+        return ResponseEntity.ok(pedidoService.listarDisponiveis());
+    }
+
+    @PatchMapping("/{id}/aceitar")
+    public ResponseEntity<EntregaResponseDTO> aceitar(
+            @PathVariable Long id,
+            @Valid @RequestBody AceitarEntregaRequestDTO dados) {
+        return ResponseEntity.ok(pedidoService.aceitar(id, dados));
+    }
+
+    // Buscar entrega pelo ID
     @GetMapping("/{id}")
-    public ResponseEntity<PedidoResponseDTO> buscarPorId(
+    public ResponseEntity<EntregaResponseDTO> buscarPorId(
             @PathVariable Long id) {
 
         return ResponseEntity.ok(
@@ -53,11 +66,11 @@ public class PedidoController {
         );
     }
 
-    // Atualizar status do pedido
+    // Atualizar status da entrega
     @PatchMapping("/{id}/status")
-    public ResponseEntity<PedidoResponseDTO> atualizarStatus(
+    public ResponseEntity<EntregaResponseDTO> atualizarStatus(
             @PathVariable Long id,
-            @Valid @RequestBody StatusPedidoRequestDTO dados) {
+            @Valid @RequestBody StatusEntregaRequestDTO dados) {
 
         return ResponseEntity.ok(
                 pedidoService.atualizarStatus(id, dados)

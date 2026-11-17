@@ -31,3 +31,27 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local Maven cache ###
+/.maven-cache/
+
+### Node/Vite build artifacts ###
+node_modules/
+dist/
+
+### Local environment (keep examples versioned) ###
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+### Logs and local H2 databases ###
+*.log
+*.mv.db
+*.trace.db
+*.lock.db
+
+### Operating system files ###
+.DS_Store
+Thumbs.db
+Desktop.ini

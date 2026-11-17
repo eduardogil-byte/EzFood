@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "skills": {
+    "frontend-app-builder": {
+      "source": "openai/plugins",
+      "ref": "main",
+      "commit": "d420d13051bffe4543ed39e30fa46b87148e47dd",
+      "sourceType": "github",
+      "skillPath": "plugins/build-web-apps/skills/frontend-app-builder/SKILL.md",
+      "computedHash": "4d173ed7b82272ad8830096f9070de41798fdaf1aca160881c7458085327c748"
+    }
+  }
+}
