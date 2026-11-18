@@ -1,96 +1,89 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, Info } from 'lucide-react';
-import { Button, FormField, Modal, ModalActions } from './UI';
-import { currency } from '../lib/format';
+import { useRef, useState } from 'react';
+import { MapPin } from 'lucide-react';
+import { FormField, Modal, ModalActions } from './UI';
 
 function initialValues(type, entity) {
-  if (type === 'cliente') return { nome: entity?.nome || '', email: entity?.email || '' };
   if (type === 'restaurante') return {
     nome: entity?.nome || '', cnpj: entity?.cnpj || '', categoria: entity?.categoria || '',
-    taxaEntrega: entity?.taxaEntrega?.toString() || '0', aberto: entity?.aberto ?? true,
+    enderecoRetirada: entity?.enderecoRetirada || '', ativo: entity?.ativo ?? true,
   };
-  return { clienteId: '', restauranteId: '', valorProdutos: '' };
+  if (type === 'motoboy') return {
+    nome: entity?.nome || '', telefone: entity?.telefone || '', email: entity?.email || '',
+    ativo: entity?.ativo ?? true, disponivel: entity?.disponivel ?? true,
+  };
+  return { descricaoConteudo: '', nomeDestinatario: '', enderecoEntrega: '', referenciaEntrega: '', observacoes: '' };
 }
 
-export default function EntityModal({ type, mode, entity, clientes, restaurantes, onSave, onClose }) {
+export default function EntityModal({ type, entity, profile, onSave, onClose }) {
   const [form, setForm] = useState(() => initialValues(type, entity));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const isEdit = mode === 'edit';
-  const names = { cliente: 'cliente', restaurante: 'restaurante', pedido: 'pedido' };
-  const restaurant = restaurantes.find((r) => String(r.id) === form.restauranteId);
-  const total = Number(form.valorProdutos || 0) + Number(restaurant?.taxaEntrega || 0);
-  const openRestaurants = restaurantes.filter((r) => r.aberto);
-  const activeClients = clientes.filter((c) => c.ativo);
-  const canCreatePedido = openRestaurants.length > 0 && activeClients.length > 0;
+  const savingRef = useRef(false);
+  const edit = Boolean(entity);
+  const delivery = type === 'entrega';
+  const title = delivery ? 'Nova entrega' : `${edit ? 'Editar' : 'Cadastrar'} ${type}`;
   const set = (key, value) => setForm((old) => ({ ...old, [key]: value }));
+  const close = () => { if (!savingRef.current) onClose(); };
 
-  async function submit(e) {
-    e.preventDefault();
+  async function submit(event) {
+    event.preventDefault();
+    if (savingRef.current) return;
     setError('');
-    setSaving(true);
-    let payload;
-    try {
-      if (type === 'cliente') payload = { nome: form.nome.trim(), email: form.email.trim() };
-      if (type === 'restaurante') payload = {
-        nome: form.nome.trim(), cnpj: form.cnpj.trim(), categoria: form.categoria.trim(),
-        aberto: form.aberto, taxaEntrega: Number(form.taxaEntrega),
-      };
-      if (type === 'pedido') payload = {
-        clienteId: Number(form.clienteId), restauranteId: Number(form.restauranteId),
-        valorProdutos: Number(form.valorProdutos),
-      };
-      await onSave(type, mode, payload, entity);
-    } catch (err) {
-      setError(err.message || 'Não foi possível salvar.');
-    } finally {
-      setSaving(false);
+    const payload = Object.fromEntries(Object.entries(form).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]));
+    const optional = ['referenciaEntrega', 'observacoes'];
+    if (Object.entries(payload).some(([key, value]) => typeof value === 'string' && !optional.includes(key) && !value)) {
+      setError('Preencha os campos obrigatórios sem usar apenas espaços.');
+      return;
     }
+    if (delivery) {
+      if (!profile?.ativo) { setError('Restaurante inativo. Ative seu cadastro para solicitar uma entrega.'); return; }
+      payload.restauranteId = profile.id;
+      optional.forEach((key) => { payload[key] = payload[key] || null; });
+    }
+    savingRef.current = true;
+    setSaving(true);
+    try { await onSave(type, payload, entity); }
+    catch (err) { setError(err.message || 'Não foi possível salvar.'); }
+    finally { savingRef.current = false; setSaving(false); }
   }
 
-  return <Modal title={`${isEdit ? 'Editar' : 'Novo'} ${names[type]}`} subtitle={isEdit ? 'Atualize os dados abaixo.' : `Preencha as informações para cadastrar ${type === 'cliente' ? 'um cliente' : type === 'restaurante' ? 'um restaurante' : 'um pedido'}.`} onClose={onClose}>
-    <form className="space-y-4" onSubmit={submit}>
-      {type === 'cliente' && <>
-        <FormField label="Nome completo"><input className="input-base" value={form.nome} onChange={(e)=>set('nome',e.target.value)} placeholder="Ex.: Maria Santos" required minLength={2} maxLength={150} autoFocus/></FormField>
-        <FormField label="E-mail"><input className="input-base" type="email" value={form.email} onChange={(e)=>set('email',e.target.value)} placeholder="Ex.: maria@email.com" required maxLength={255}/></FormField>
-        {isEdit && <div className="rounded-lg bg-[#FFF7ED] p-3 text-xs text-[#93999d]">A situação do cliente e sua data de cadastro são administradas pelo backend.</div>}
-      </>}
-      {type === 'restaurante' && <>
-        <FormField label="Nome do restaurante"><input className="input-base" value={form.nome} onChange={(e)=>set('nome',e.target.value)} placeholder="Ex.: Sabor da Casa" required minLength={2} maxLength={150} autoFocus/></FormField>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormField label="CNPJ"><input className="input-base" value={form.cnpj} onChange={(e)=>set('cnpj',e.target.value)} placeholder="Somente números" required maxLength={30}/></FormField>
-          <FormField label="Categoria"><input className="input-base" value={form.categoria} onChange={(e)=>set('categoria',e.target.value)} placeholder="Ex.: Hamburgueria" required maxLength={100}/></FormField>
-        </div>
-        <FormField label="Taxa de entrega (R$)"><input className="input-base" type="number" min="0" step="0.01" value={form.taxaEntrega} onChange={(e)=>set('taxaEntrega',e.target.value)} required /></FormField>
-        <label className="flex items-center justify-between rounded-xl border border-[#E6D9CD] p-4 cursor-pointer">
-          <div><span className="text-sm font-bold">Restaurante aberto</span><p className="text-xs text-[#a0a5a8] mt-1">Permitir novos pedidos para este restaurante</p></div>
-          <input type="checkbox" checked={form.aberto} onChange={(e)=>set('aberto',e.target.checked)} className="h-4.5 w-4.5 accent-[#F97316]"/>
-        </label>
-      </>}
-      {type === 'pedido' && <>
-        {!canCreatePedido && <div className="p-3 bg-[#fff7e8] text-[#b28236] text-xs rounded-xl flex items-start gap-2"><AlertTriangle size={17} className="shrink-0"/><span>Para criar pedidos, cadastre pelo menos um cliente ativo e um restaurante aberto.</span></div>}
-        <FormField label="Cliente"><select className="input-base" required value={form.clienteId} onChange={(e)=>set('clienteId',e.target.value)}>
-          <option value="">Selecione um cliente</option>
-          {activeClients.map(c=><option value={c.id} key={c.id}>{c.nome} · #{c.id}</option>)}
-        </select></FormField>
-        <FormField label="Restaurante"><select className="input-base" required value={form.restauranteId} onChange={(e)=>set('restauranteId',e.target.value)}>
-          <option value="">Selecione um restaurante aberto</option>
-          {openRestaurants.map(r=><option value={r.id} key={r.id}>{r.nome}</option>)}
-        </select></FormField>
-        <FormField label="Valor dos produtos (R$)"><input className="input-base" type="number" min="0.01" step="0.01" required value={form.valorProdutos} onChange={(e)=>set('valorProdutos',e.target.value)} placeholder="Ex.: 39.90"/></FormField>
-        <div className="bg-[#FFF7ED] rounded-xl p-4 space-y-2.5">
-          <div className="flex justify-between text-[12px] text-[#848b8f]"><span>Valor dos produtos</span><span>{currency(form.valorProdutos)}</span></div>
-          <div className="flex justify-between text-[12px] text-[#848b8f]"><span>Taxa de entrega</span><span>{currency(restaurant?.taxaEntrega)}</span></div>
-          <div className="h-px bg-[#E6D9CD]"/>
-          <div className="flex items-center justify-between"><span className="font-extrabold text-sm">Total estimado</span><span className="font-display font-extrabold text-xl text-[#C2410C]">{currency(total)}</span></div>
-          <div className="flex gap-1.5 items-start text-[11px] text-[#a4aaac]"><Info size={13} className="shrink-0 mt-[1px]"/>O valor final é recalculado no servidor.</div>
-        </div>
-      </>}
-      {error && <div role="alert" className="rounded-lg border border-red-100 bg-red-50 text-red-700 text-xs p-3 flex gap-2"><AlertTriangle size={16} className="shrink-0"/>{error}</div>}
-      <div className="flex justify-end gap-2.5 pt-5 mt-6 border-t border-[#F1E5D8]">
-        <Button variant="ghost" type="button" onClick={onClose}>Cancelar</Button>
-        <Button busy={saving} disabled={type==='pedido' && !canCreatePedido} type="submit">{isEdit ? 'Salvar alterações' : `Cadastrar ${names[type]}`}</Button>
-      </div>
+  const input = (key, label, maxLength, options = {}) => <FormField label={label}>
+    <input className="input-base" name={key} value={form[key]} onChange={(e) => set(key, key === 'cnpj' ? e.target.value.replace(/\D/g, '') : e.target.value)} required maxLength={maxLength} {...options}/>
+  </FormField>;
+  const toggle = (key, label) => <label className="toggle-row">
+    <span className="font-semibold text-sm">{label}</span>
+    <input className="switch" type="checkbox" checked={form[key]} onChange={(e) => set(key, e.target.checked)}/>
+  </label>;
+  return <Modal title={title} subtitle={delivery ? 'Preencha os dados para solicitar a retirada.' : 'Mantenha seus dados atualizados.'} onClose={close}>
+    <form className="space-y-4" onSubmit={submit} aria-busy={saving}>
+      <fieldset disabled={saving} className="space-y-4">
+        {type === 'restaurante' && <>
+          {input('nome', 'Nome do restaurante', 255, { autoComplete: 'organization', autoFocus: true })}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {input('cnpj', 'CNPJ', 14, { inputMode: 'numeric', pattern: '[0-9]{14}', title: 'Informe os 14 dígitos do CNPJ.' })}
+            {input('categoria', 'Categoria', 255)}
+          </div>
+          <FormField label="Endereço de retirada"><textarea className="input-base" name="enderecoRetirada" value={form.enderecoRetirada} onChange={(e) => set('enderecoRetirada', e.target.value)} required maxLength={500} rows={3} autoComplete="street-address"/></FormField>
+          {toggle('ativo', 'Restaurante ativo')}
+        </>}
+        {type === 'motoboy' && <>
+          {input('nome', 'Nome completo', 255, { autoComplete: 'name', autoFocus: true })}
+          {input('telefone', 'Telefone', 30, { type: 'tel', autoComplete: 'tel' })}
+          {input('email', 'E-mail', 255, { type: 'email', autoComplete: 'email' })}
+          {toggle('ativo', 'Cadastro ativo')}
+          {toggle('disponivel', 'Disponível para entregas')}
+        </>}
+        {delivery && <>
+          {input('descricaoConteudo', 'Descrição do conteúdo', 500, { autoFocus: true })}
+          {input('nomeDestinatario', 'Nome do destinatário', 255)}
+          <FormField label="Endereço de entrega"><textarea className="input-base" name="enderecoEntrega" value={form.enderecoEntrega} onChange={(e) => set('enderecoEntrega', e.target.value)} required maxLength={500} rows={3}/></FormField>
+          <FormField label="Referência (opcional)"><input className="input-base" name="referenciaEntrega" value={form.referenciaEntrega} onChange={(e) => set('referenciaEntrega', e.target.value)} maxLength={500}/></FormField>
+          <FormField label="Observações (opcional)"><textarea className="input-base" name="observacoes" value={form.observacoes} onChange={(e) => set('observacoes', e.target.value)} maxLength={1000} rows={3}/></FormField>
+          <div className="flex items-start gap-2 p-3 rounded-xl bg-[#FFF7ED] text-sm"><MapPin size={18} className="shrink-0 text-[#C2410C] mt-0.5"/><div><strong>Retirada no restaurante</strong><p className="text-slate-600 break-words mt-1">{profile?.enderecoRetirada}</p></div></div>
+        </>}
+      </fieldset>
+      {error && <div className="notice notice-error" role="alert">{error}</div>}
+      <ModalActions onCancel={close} saving={saving} submitLabel={delivery ? 'Solicitar entrega' : edit ? 'Salvar alterações' : 'Criar cadastro'}/>
     </form>
   </Modal>;
 }
